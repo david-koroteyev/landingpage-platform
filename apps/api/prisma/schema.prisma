@@ -1,0 +1,177 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  MARKETER
+  VIEWER
+}
+
+enum PageStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String
+  password  String
+  role      Role     @default(MARKETER)
+  brandId   String?
+
+  brand       Brand?         @relation(fields: [brandId], references: [id])
+  pages       Page[]
+  pageVersions PageVersion[]
+  promptLogs  PromptLog[]
+  publishRecords PublishRecord[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Brand {
+  id    String @id @default(cuid())
+  name  String
+  // JSON: { primaryColor, secondaryColor, fontFamily, logoUrl, etc. }
+  preset Json   @default("{}")
+
+  users     User[]
+  pages     Page[]
+  templates Template[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Page {
+  id       String     @id @default(cuid())
+  title    String
+  slug     String     @unique
+  status   PageStatus @default(DRAFT)
+  // Full page JSON (PageSchema type from @lp/shared)
+  schema   Json
+
+  authorId String
+  author   User   @relation(fields: [authorId], references: [id])
+
+  brandId String?
+  brand   Brand?  @relation(fields: [brandId], references: [id])
+
+  campaign   String?
+  tags       String[]
+  archivedAt DateTime?
+
+  versions       PageVersion[]
+  publishRecords PublishRecord[]
+  promptLogs     PromptLog[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+  @@index([authorId])
+  @@index([brandId])
+}
+
+model PageVersion {
+  id      String @id @default(cuid())
+  pageId  String
+  page    Page   @relation(fields: [pageId], references: [id], onDelete: Cascade)
+  version Int    // monotonically increasing per page
+  schema  Json   // snapshot of PageSchema at this version
+  message String?
+
+  authorId String
+  author   User   @relation(fields: [authorId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@unique([pageId, version])
+  @@index([pageId])
+}
+
+model Template {
+  id          String  @id @default(cuid())
+  name        String
+  description String?
+  category    String?
+  // Full PageSchema used as template starting point
+  schema      Json
+  thumbnail   String?
+  isGlobal    Boolean @default(false)
+
+  brandId String?
+  brand   Brand?  @relation(fields: [brandId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model PublishRecord {
+  id          String  @id @default(cuid())
+  pageId      String
+  page        Page    @relation(fields: [pageId], references: [id], onDelete: Cascade)
+  publishedBy String
+  publisher   User    @relation(fields: [publishedBy], references: [id])
+  version     Int
+  url         String
+  // Snapshot of PageSchema at publish time for rollback
+  schema      Json
+  isActive    Boolean @default(true)
+
+  createdAt DateTime @default(now())
+
+  @@index([pageId])
+}
+
+model PromptLog {
+  id         String  @id @default(cuid())
+  pageId     String
+  page       Page    @relation(fields: [pageId], references: [id], onDelete: Cascade)
+  userId     String
+  user       User    @relation(fields: [userId], references: [id])
+  prompt     String
+  // Array of AiOperation objects returned
+  operations Json
+  applied    Boolean @default(false)
+  model      String
+  tokensUsed Int?
+  error      String?
+
+  createdAt DateTime @default(now())
+
+  @@index([pageId])
+  @@index([userId])
+}
+
+model ImportJob {
+  id         String  @id @default(cuid())
+  url        String
+  status     String  @default("pending") // pending | running | completed | failed
+  resultPageId String?
+  error      String?
+  requestedBy String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Asset {
+  id         String  @id @default(cuid())
+  name       String
+  url        String
+  mimeType   String
+  size       Int?
+  brandId    String?
+  uploadedBy String
+
+  createdAt DateTime @default(now())
+}

@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.next/
+.turbo/
+*.env
+!*.env.example
+*.env.local
+!*.env.local.example
+prisma/migrations/dev/
+.DS_Store
+coverage/
