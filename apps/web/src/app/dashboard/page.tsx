@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Plus, Search, Upload } from 'lucide-react';
+import { Plus, Search, Upload, Check, AlertCircle } from 'lucide-react';
 import { usePages, useCreatePage, useDuplicatePage, useArchivePage, useImportUrl } from '@/hooks/usePages';
 import { PageCard } from '@/components/dashboard/PageCard';
 import { Dialog, DialogContent, DialogTrigger, DialogClose } from '@/components/ui/Dialog';
@@ -41,6 +41,18 @@ export default function DashboardPage() {
   const [importUrlValue, setImportUrlValue] = useState('');
   const [importTitle, setImportTitle] = useState('');
 
+  const IMPORT_STEPS: { key: string; label: string }[] = [
+    { key: 'launching_browser',    label: 'Launching browser' },
+    { key: 'capturing_screenshot', label: 'Capturing screenshot' },
+    { key: 'analyzing_with_ai',    label: 'Analyzing with AI' },
+    { key: 'building_page',        label: 'Building page' },
+  ];
+
+  function currentStepIndex(step: string | null) {
+    if (!step) return -1;
+    return IMPORT_STEPS.findIndex((s) => s.key === step);
+  }
+
   function handleSearch(value: string) {
     setSearch(value);
     clearTimeout((window as Record<string, unknown>)._searchTimer as ReturnType<typeof setTimeout>);
@@ -59,51 +71,134 @@ export default function DashboardPage() {
         </div>
         <div className="flex items-center gap-2">
           {/* Import */}
-          <Dialog open={importOpen} onOpenChange={setImportOpen}>
+          <Dialog
+            open={importOpen}
+            onOpenChange={(open) => {
+              // Prevent closing while import is in progress
+              if (!open && importUrl.isPending) return;
+              if (!open) {
+                importUrl.reset();
+                setImportUrlValue('');
+                setImportTitle('');
+              }
+              setImportOpen(open);
+            }}
+          >
             <DialogTrigger asChild>
               <button className="btn-secondary gap-1.5">
                 <Upload className="h-4 w-4" />
                 Import URL
               </button>
             </DialogTrigger>
-            <DialogContent title="Import from URL" description="Fetch an existing landing page and convert it into an editable page. Only import pages you are authorized to copy.">
-              <div className="space-y-4">
-                <div>
-                  <label className="label">Page URL *</label>
-                  <input
-                    className="input"
-                    placeholder="https://example.com/landing-page"
-                    value={importUrlValue}
-                    onChange={(e) => setImportUrlValue(e.target.value)}
-                  />
+            <DialogContent
+              title="Import from URL"
+              description="Fetch an existing landing page and convert it into an editable page. Only import pages you are authorized to copy."
+            >
+              {importUrl.isPending ? (
+                // ── Progress view ──────────────────────────────────────────
+                <div className="py-2 space-y-5">
+                  <ol className="space-y-3">
+                    {IMPORT_STEPS.map((s, i) => {
+                      const active = currentStepIndex(importUrl.step);
+                      const done = i < active;
+                      const current = i === active;
+                      return (
+                        <li key={s.key} className="flex items-center gap-3">
+                          <span
+                            className={cn(
+                              'flex h-7 w-7 shrink-0 items-center justify-center rounded-full border-2 text-xs font-semibold transition-colors',
+                              done    && 'border-green-500 bg-green-500 text-white',
+                              current && 'border-brand-600 bg-brand-50 text-brand-600',
+                              !done && !current && 'border-gray-200 text-gray-400'
+                            )}
+                          >
+                            {done ? <Check className="h-4 w-4" /> : current ? <Spinner /> : i + 1}
+                          </span>
+                          <span
+                            className={cn(
+                              'text-sm',
+                              done    && 'text-green-600 line-through',
+                              current && 'text-gray-900 font-medium',
+                              !done && !current && 'text-gray-400'
+                            )}
+                          >
+                            {s.label}
+                          </span>
+                        </li>
+                      );
+                    })}
+                  </ol>
+                  <p className="text-xs text-gray-400 text-center">
+                    This usually takes 15–30 seconds. Please wait…
+                  </p>
                 </div>
-                <div>
-                  <label className="label">Page title (optional)</label>
-                  <input
-                    className="input"
-                    placeholder="My Imported Page"
-                    value={importTitle}
-                    onChange={(e) => setImportTitle(e.target.value)}
-                  />
+              ) : importUrl.error ? (
+                // ── Error view ─────────────────────────────────────────────
+                <div className="space-y-4">
+                  <div className="flex items-start gap-3 rounded-lg border border-red-200 bg-red-50 p-3">
+                    <AlertCircle className="h-5 w-5 shrink-0 text-red-500 mt-0.5" />
+                    <div>
+                      <p className="text-sm font-medium text-red-800">Import failed</p>
+                      <p className="text-sm text-red-600 mt-0.5">
+                        {importUrl.error.message}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex justify-end gap-2">
+                    <DialogClose asChild>
+                      <button className="btn-secondary">Close</button>
+                    </DialogClose>
+                    <button
+                      className="btn-primary"
+                      onClick={() => {
+                        importUrl.reset();
+                      }}
+                    >
+                      Try again
+                    </button>
+                  </div>
                 </div>
-                <div className="flex justify-end gap-2 pt-2">
-                  <DialogClose asChild>
-                    <button className="btn-secondary">Cancel</button>
-                  </DialogClose>
-                  <button
-                    className="btn-primary"
-                    disabled={!importUrlValue || importUrl.isPending}
-                    onClick={async () => {
-                      await importUrl.mutateAsync({ url: importUrlValue, title: importTitle || undefined });
-                      setImportOpen(false);
-                      setImportUrlValue('');
-                      setImportTitle('');
-                    }}
-                  >
-                    {importUrl.isPending ? <><Spinner className="mr-2" />Importing...</> : 'Import Page'}
-                  </button>
+              ) : (
+                // ── Input view ─────────────────────────────────────────────
+                <div className="space-y-4">
+                  <div>
+                    <label className="label">Page URL *</label>
+                    <input
+                      className="input"
+                      placeholder="https://example.com/landing-page"
+                      value={importUrlValue}
+                      onChange={(e) => setImportUrlValue(e.target.value)}
+                      autoFocus
+                    />
+                  </div>
+                  <div>
+                    <label className="label">Page title (optional)</label>
+                    <input
+                      className="input"
+                      placeholder="My Imported Page"
+                      value={importTitle}
+                      onChange={(e) => setImportTitle(e.target.value)}
+                    />
+                  </div>
+                  <div className="flex justify-end gap-2 pt-2">
+                    <DialogClose asChild>
+                      <button className="btn-secondary">Cancel</button>
+                    </DialogClose>
+                    <button
+                      className="btn-primary"
+                      disabled={!importUrlValue.trim()}
+                      onClick={() => {
+                        importUrl.mutateAsync({
+                          url: importUrlValue.trim(),
+                          title: importTitle.trim() || undefined,
+                        });
+                      }}
+                    >
+                      Import Page
+                    </button>
+                  </div>
                 </div>
-              </div>
+              )}
             </DialogContent>
           </Dialog>
 

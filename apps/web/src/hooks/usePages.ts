@@ -1,9 +1,21 @@
 'use client';
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useState, useEffect } from 'react';
 import { api } from '@/lib/api';
 import type { Page } from '@lp/shared';
 import { useRouter } from 'next/navigation';
+
+interface ImportJob {
+  id: string;
+  url: string;
+  status: 'pending' | 'running' | 'completed' | 'failed';
+  step: string | null;
+  resultPageId: string | null;
+  error: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
 
 interface PageListResult {
   pages: Page[];
@@ -157,13 +169,43 @@ export function useUnpublish() {
 export function useImportUrl() {
   const qc = useQueryClient();
   const router = useRouter();
+  const [activeJobId, setActiveJobId] = useState<string | null>(null);
 
-  return useMutation({
-    mutationFn: ({ url, title }: { url: string; title?: string }) =>
-      api.post<{ pageId: string; title: string; blockCount: number; warnings: string[] }>('/import/url', { url, title }),
-    onSuccess: (result) => {
-      qc.invalidateQueries({ queryKey: ['pages'] });
-      router.push(`/editor/${result.pageId}`);
-    },
+  const jobQuery = useQuery<ImportJob>({
+    queryKey: ['importJob', activeJobId],
+    queryFn: () => api.get<ImportJob>(`/import/job/${activeJobId}`),
+    enabled: !!activeJobId,
+    refetchInterval: activeJobId ? 2000 : false,
   });
+
+  useEffect(() => {
+    if (!jobQuery.data) return;
+    if (jobQuery.data.status === 'completed' && jobQuery.data.resultPageId) {
+      setActiveJobId(null);
+      qc.invalidateQueries({ queryKey: ['pages'] });
+      router.push(`/editor/${jobQuery.data.resultPageId}`);
+    } else if (jobQuery.data.status === 'failed') {
+      setActiveJobId(null);
+    }
+  }, [jobQuery.data?.status, jobQuery.data?.resultPageId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const startMutation = useMutation({
+    mutationFn: ({ url, title }: { url: string; title?: string }) =>
+      api.post<{ jobId: string }>('/import/url', { url, title }),
+    onSuccess: ({ jobId }) => setActiveJobId(jobId),
+  });
+
+  const isPolling = !!activeJobId;
+  const failedJob = jobQuery.data?.status === 'failed' ? jobQuery.data : null;
+
+  return {
+    mutateAsync: startMutation.mutateAsync,
+    isPending: startMutation.isPending || isPolling,
+    step: jobQuery.data?.step ?? null,
+    error: startMutation.error ?? (failedJob ? new Error(failedJob.error ?? 'Import failed') : null),
+    reset: () => {
+      startMutation.reset();
+      setActiveJobId(null);
+    },
+  };
 }

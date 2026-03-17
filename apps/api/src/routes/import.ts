@@ -11,24 +11,35 @@ const router = Router();
 
 router.use(requireAuth);
 
-// Kick off an import from a URL
+// Kick off an import from a URL — returns immediately with a jobId for polling
 router.post(
   '/url',
   validate(importUrlSchema),
   asyncHandler(async (req: AuthRequest, res) => {
     const { url, title } = req.body as { url: string; title?: string };
-
-    // Run synchronously for MVP (for production: use a job queue)
-    const result = await importService.importFromUrl(url, req.user!.id, title);
-    res.status(201).json(result);
+    const { jobId } = await importService.startImportJob(url, req.user!.id, title);
+    res.status(202).json({ jobId });
   })
 );
 
-// Get status of an import job
+// Poll the status of an import job
 router.get(
   '/job/:jobId',
   asyncHandler(async (req: AuthRequest, res) => {
-    const job = await prisma.importJob.findUnique({ where: { id: req.params.jobId } });
+    const job = await prisma.importJob.findUnique({
+      where: { id: req.params.jobId },
+      select: {
+        id: true,
+        url: true,
+        status: true,
+        step: true,
+        resultPageId: true,
+        error: true,
+        createdAt: true,
+        updatedAt: true,
+        // Exclude screenshot from polling response (large payload)
+      },
+    });
     if (!job) {
       res.status(404).json({ error: 'Import job not found' });
       return;

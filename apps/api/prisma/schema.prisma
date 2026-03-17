@@ -153,12 +153,14 @@ model PromptLog {
 }
 
 model ImportJob {
-  id         String  @id @default(cuid())
-  url        String
-  status     String  @default("pending") // pending | running | completed | failed
+  id           String  @id @default(cuid())
+  url          String
+  status       String  @default("pending") // pending | running | completed | failed
+  step         String? // launching_browser | capturing_screenshot | analyzing_with_ai | building_page
   resultPageId String?
-  error      String?
-  requestedBy String
+  screenshot   String? // base64 JPEG of the scraped page for reference
+  error        String?
+  requestedBy  String
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
