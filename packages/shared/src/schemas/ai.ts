@@ -56,7 +56,7 @@ export const aiOperationSchema = z.discriminatedUnion('type', [
 ]);
 
 export const aiOperationsResponseSchema = z.object({
-  operations: z.array(aiOperationSchema).max(20),
+  operations: z.array(aiOperationSchema).max(30),
   explanation: z.string().max(1000),
 });
 

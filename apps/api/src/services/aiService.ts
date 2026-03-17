@@ -5,6 +5,7 @@ import { aiOperationsResponseSchema } from '@lp/shared';
 import type { PageSchema, AiOperation } from '@lp/shared';
 import { BLOCK_META } from '@lp/shared';
 import { v4 as uuid } from 'uuid';
+import { extractUrls, scrapeUrl, formatScrapedContent } from './urlScraper.js';
 
 const client = env.ANTHROPIC_API_KEY && env.ANTHROPIC_API_KEY !== 'mock'
   ? new Anthropic({ apiKey: env.ANTHROPIC_API_KEY })
@@ -24,7 +25,7 @@ ${Object.entries(BLOCK_META)
 
 ## Operation schema
 You must return a JSON object with exactly two keys:
-- "operations": array of operation objects (max 10 per response)
+- "operations": array of operation objects (max 30 per response)
 - "explanation": 1-2 sentence human-readable summary of what you will do
 
 ## Available operations
@@ -35,6 +36,9 @@ You must return a JSON object with exactly two keys:
 5. update_block_style — { type: "update_block_style", blockId: "<id>", styles: {} }
 6. update_page_settings — { type: "update_page_settings", settings: {} }
 7. update_page_meta — { type: "update_page_meta", meta: {} }
+
+## Replicating from a URL
+If the user message includes "Reference page content (scraped from URL in prompt)", use that content to replicate the page structure and copy as closely as possible using the available block types. Map headings → hero/text_image, body copy → text_image, testimonials → testimonial, FAQs → faq, buttons/CTAs → cta, lists of features → text_image or comparison_table.
 
 ## Rules
 - NEVER output HTML, JSX, CSS, or code of any kind in props/styles values
@@ -65,10 +69,24 @@ export async function runAiPrompt(
   // For pages with many blocks, we send a summary of block IDs+types+headings.
   const schemaContext = buildSchemaContext(currentSchema);
 
+  // Detect and scrape any URLs in the prompt
+  const urls = extractUrls(prompt);
+  let scrapedContext = '';
+  if (urls.length > 0) {
+    const results = await Promise.allSettled(urls.slice(0, 2).map(scrapeUrl));
+    const scraped = results
+      .filter((r): r is PromiseFulfilledResult<Awaited<ReturnType<typeof scrapeUrl>>> => r.status === 'fulfilled')
+      .map(r => formatScrapedContent(r.value));
+    if (scraped.length > 0) {
+      scrapedContext = `\n\n## Reference page content (scraped from URL in prompt)\n${scraped.join('\n\n---\n\n')}`;
+    }
+  }
+
   const userMessage = `Current page schema context:
 \`\`\`json
 ${JSON.stringify(schemaContext, null, 2)}
 \`\`\`
+${scrapedContext}
 
 User request: ${prompt}`;
 
@@ -83,13 +101,16 @@ User request: ${prompt}`;
   } else {
     const response = await client.messages.create({
       model: MODEL,
-      max_tokens: 2048,
+      max_tokens: 8192,
       system: SYSTEM_PROMPT,
       messages: [{ role: 'user', content: userMessage }],
     });
 
     const block = response.content[0];
     if (block.type !== 'text') throw new Error('Unexpected AI response type');
+    if (response.stop_reason === 'max_tokens') {
+      throw new Error('AI response was truncated (max_tokens reached). Try a simpler request.');
+    }
     rawContent = block.text;
     tokensUsed = response.usage.input_tokens + response.usage.output_tokens;
   }

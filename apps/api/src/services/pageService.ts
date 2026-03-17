@@ -209,22 +209,29 @@ export async function restoreVersion(pageId: string, versionId: string, authorId
 // --- Internal helpers ---
 
 async function createVersion(pageId: string, schema: PageSchema, authorId: string, message?: string) {
-  const lastVersion = await prisma.pageVersion.findFirst({
-    where: { pageId },
-    orderBy: { version: 'desc' },
-    select: { version: true },
-  });
-  const nextVersion = (lastVersion?.version ?? 0) + 1;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const lastVersion = await prisma.pageVersion.findFirst({
+      where: { pageId },
+      orderBy: { version: 'desc' },
+      select: { version: true },
+    });
+    const nextVersion = (lastVersion?.version ?? 0) + 1;
 
-  return prisma.pageVersion.create({
-    data: {
-      pageId,
-      version: nextVersion,
-      schema: schema as object,
-      message: message ?? null,
-      authorId,
-    },
-  });
+    try {
+      return await prisma.pageVersion.create({
+        data: {
+          pageId,
+          version: nextVersion,
+          schema: schema as object,
+          message: message ?? null,
+          authorId,
+        },
+      });
+    } catch (err: any) {
+      if (err?.code === 'P2002' && attempt < 4) continue;
+      throw err;
+    }
+  }
 }
 
 async function pruneVersions(pageId: string) {
